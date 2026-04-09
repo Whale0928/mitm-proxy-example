@@ -1,0 +1,47 @@
+services:
+  mitmproxy:
+    # 공식 이미지. mitmdump 가 entrypoint.
+    image: mitmproxy/mitmproxy:latest
+    container_name: mitm-cache
+    restart: unless-stopped
+
+    # mitmdump 는 stdout 출력을 위해 TTY 가 필요하다.
+    # 이게 없으면 컨테이너는 정상 실행되지만 docker logs 가 텅 빈다.
+    tty: true
+
+    ports:
+      # 호스트의 8080 -> 컨테이너 8080. 시스템 프록시를 127.0.0.1:8080 으로 잡으면 된다.
+      - "8080:8080"
+
+    volumes:
+      # addon 스크립트 (읽기 전용)
+      - ./cache_addon.py:/work/cache_addon.py:ro
+
+      # 캐시 디렉토리 (영속). 컨테이너 안에서 ./cache 가 곧 호스트의 ./cache 가 된다.
+      - ./cache:/work/cache
+
+      # CA 디렉토리. 컨테이너 안의 mitmproxy 가 이 디렉토리에서 인증서를 읽는다.
+      # ca/ 를 깃 저장소에 커밋해두면 어디서 띄워도 같은 CA 를 재사용할 수 있다.
+      - ./ca:/home/mitmproxy/.mitmproxy
+
+    working_dir: /work
+
+    # run.sh 의 옵션과 동일.
+    # YAML 안에서 정규식의 $ 는 $$ 로 이스케이프해야 compose 가 변수로 해석하지 않는다.
+    command:
+      - mitmdump
+      - -s
+      - cache_addon.py
+      - --set
+      - connection_strategy=lazy
+      - --set
+      # 컨테이너 안의 mitmproxy 입장에선 호스트에서 들어오는 curl/브라우저 트래픽이
+      # 도커 NAT 를 거쳐 비로컬 IP 로 보인다. 기본값 block_global=true 면 이걸
+      # "외부에서 프록시를 악용하는 시도"로 간주해 죽여버리므로 false 로 풀어준다.
+      - block_global=false
+      - --set
+      - termlog_verbosity=warn
+      - --set
+      - flow_detail=0
+      - --ignore-hosts
+      - (^|\.)(anthropic\.com|icloud\.com|apple\.com|discord\.com|github\.com|googleapis\.com|gvt1\.com|gvt2\.com)$$
