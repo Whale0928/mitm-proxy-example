@@ -10,30 +10,21 @@
 # 이 정규식들 중 하나에 매칭되는 호스트만 mitmproxy 가 가로챈다.
 # 나머지 트래픽 (Discord, iCloud, OS 백그라운드 등) 은 그대로 흘려보낸다.
 #
-# 각 패턴은 (^|\.)example\.com$ 형태로 작성해 apex 도메인과
-# 모든 서브도메인 (www, m, news, finance 등) 을 함께 매칭시킨다.
-allow_hosts:
-  # 영문 IT/AI 매체
-  - (^|\.)engadget\.com$
-  - (^|\.)gizmodo\.com$
-  - (^|\.)marktechpost\.com$
-  - (^|\.)mit\.edu$                          # news.mit.edu
-  - (^|\.)theverge\.com$
-  - (^|\.)tomshardware\.com$
-  - (^|\.)wccftech\.com$
-  - (^|\.)yahoo\.com$                        # finance.yahoo.com
-  - (^|\.)businessinsider\.com$
-  - (^|\.)aibusiness\.com$
-  - (^|\.)artificialintelligence-news\.com$
-  - (^|\.)aitimes\.com$
-  - (^|\.)cnbc\.com$
-  - (^|\.)techcrunch\.com$
-  - (^|\.)trendforce\.com$
-  - (^|\.)venturebeat\.com$
-
-  # 한글 IT/AI 매체
-  - (^|\.)itworld\.co\.kr$
-  - (^|\.)aitimes\.kr$
+# 중요: mitmproxy 는 "host:port" 형태 문자열에 매칭한다. 즉 패턴이
+#   engadget.com
+# 이 아니라
+#   engadget.com:443
+# 과 같은 입력에 대해 비교된다. 포트를 빼먹으면 매칭이 전혀 안 된다.
+#
+# 각 패턴은 아래 형태로 작성한다:
+#   ^(.+\.)?example\.com:\d+$
+# - `^(.+\.)?`   : www, m, news, finance 등 모든 서브도메인 허용 (없어도 OK)
+# - `example\.com` : 실제 도메인 (점 이스케이프 필요)
+# - `:\d+$`      : 모든 포트 (80/443 등) 허용
+# TODO: allow_hosts 동작 방식 재검토 후 다시 추가 예정.
+# (regular proxy 모드에서 allow_hosts 가 매칭 안 되는 호스트를
+#  터널링하는지 차단하는지 실제 동작을 먼저 확인해야 함)
+# allow_hosts: []
 
 # ─────────────────────────────────────────────────────────────
 # 캐시 동작 관련 옵션
