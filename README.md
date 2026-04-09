@@ -1,120 +1,137 @@
 # mitm-proxy-example
 
-mitmproxy 기반 **개발용 HTTP(S) 캐시 프록시** 예제.
+mitmproxy 기반 **개발용 HTTP(S) 캐시 프록시**.
 
-## 목적
+> 이 프록시가 왜 필요한지, 어떻게 동작하는지부터 알고 싶다면 → [what-is-mitm-proxy.md](./what-is-mitm-proxy.md)
 
-크롤러/스크래퍼를 개발할 때 매번 실제 사이트에 요청을 보내면
-- 차단당할 수 있고
-- 사이트가 변하면 재현이 안 되고
-- 개발 속도가 느려진다.
-
-이 프록시는 한 번 본 응답을 디스크에 저장해두고, 다음부터는 캐시에서 그대로
-돌려준다. 사람이 브라우저로 사이트를 돌아다니면서 페이지를 채워두면, 이후
-개발/테스트에선 인터넷이 없어도 동일한 응답을 재생할 수 있다.
+이 문서는 **셋업과 실행 방법**만 다룬다.
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `cache_addon.py` | mitmproxy addon. URL 단위로 요청을 캐시 디렉토리에 JSON 으로 저장 |
-| `run.sh` | mitmdump 실행 래퍼. 필수 옵션 + 노이즈 차단 + 로그 기록 |
-| `cache/` | 캐시된 응답 (한 요청 = 한 JSON 파일, 키는 URL 의 sha256) |
-| `log.log` | mitmdump 실행 로그 (자동 생성) |
+| `cache_addon.py` | mitmproxy addon. URL 단위로 응답을 디스크에 저장/재생 |
+| `config.yaml` | mitmproxy 옵션 (캐시 대상 사이트, 동작 옵션 모음) |
+| `docker-compose.yml` | 공식 mitmproxy 이미지로 컨테이너 기동 |
+| `ca/` | mitmproxy CA 인증서 (개인키 포함, **프라이빗 저장소 전제**) |
+| `cache/` | 캐시된 응답 (한 요청 = 한 JSON 파일) |
+| `log.log` | 실행 로그 (자동 생성) |
 
 ## 사전 준비
 
-### 1. 설치
+### 1. mitmproxy CA 인증서 신뢰 등록 (한 번만)
+
+HTTPS 사이트를 가로채려면 mitmproxy 의 가짜 CA 인증서를 시스템이 신뢰해야 한다.
+이 저장소의 `ca/` 디렉토리에 인증서가 들어있다.
 
 ```sh
-brew install mitmproxy
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  ./ca/mitmproxy-ca-cert.pem
 ```
+
+확인: 키체인 접근 → 시스템 → "mitmproxy" 검색.
 
 ### 2. 시스템 프록시 설정
 
-활성 네트워크 인터페이스에 프록시를 박는다 (예: Ethernet).
-인터페이스 이름은 `networksetup -listnetworkserviceorder` 로 확인.
+활성 네트워크 인터페이스 이름 확인:
+```sh
+networksetup -listnetworkserviceorder
+route get default | grep interface
+```
 
+활성 인터페이스에 프록시 설정 (예: Ethernet):
 ```sh
 sudo networksetup -setwebproxy "Ethernet" 127.0.0.1 8080
 sudo networksetup -setsecurewebproxy "Ethernet" 127.0.0.1 8080
 ```
 
 확인:
-
 ```sh
 scutil --proxy
 # HTTPProxy / HTTPSProxy 가 127.0.0.1:8080 으로 잡혀있어야 함
 ```
 
-### 3. mitmproxy CA 인증서 신뢰 등록
+> ⚠️ 이 시점부터는 mitmproxy 컨테이너가 떠 있어야 인터넷이 동작한다.
+> 다음 단계로 바로 가야 한다.
 
-HTTPS 사이트를 가로채려면 mitmproxy 의 가짜 인증서를 시스템이 신뢰해야 한다.
-한 번 mitmdump 를 실행한 적이 있으면 `~/.mitmproxy/` 에 인증서가 생성돼 있다.
-
-```sh
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain \
-  ~/.mitmproxy/mitmproxy-ca-cert.pem
-```
-
-또는 브라우저로 `http://mitm.it` 접속 → Apple 로 표시된 인증서 다운로드 →
-키체인 접근에서 "항상 신뢰" 설정.
-
-## 실행
+## 기동
 
 ```sh
-./run.sh
+docker compose up -d
 ```
 
-이 스크립트는 다음을 수행한다:
+로그 보기 (다른 터미널):
+```sh
+docker compose logs -f mitmproxy
+```
 
-1. **`-s cache_addon.py`** — 캐시 addon 로드
-2. **`--set connection_strategy=lazy`** — 업스트림 사전 연결을 막아 캐시 HIT 시
-   네트워크에 전혀 나가지 않게 한다. **이 옵션 없으면 오프라인 재생이 안 됨.**
-3. **`--ignore-hosts '...'`** — certificate pinning 으로 가로채기를 거부하는
-   호스트들을 우회한다. 두 가지 효과:
-   - **Claude Code 등 자체 도구**(`anthropic.com`) 트래픽이 캐시에 잡혀
-     의도치 않게 재생되는 것을 방지
-   - **OS 백그라운드 트래픽**(`icloud.com`, `apple.com`, `gvt1.com` 등)이
-     handshake 실패 로그로 화면을 도배하는 것을 차단
-4. **`2>&1 | tee log.log`** — 화면 출력과 동시에 `log.log` 파일에 전체 로그 저장
+`config.yaml` 의 `allow_hosts` 에 등록된 사이트로 트래픽이 가면
+`[MISS]` `[SAVE]` 가 찍히고, 같은 URL 을 다시 호출하면 `[HIT]` 가 찍힌다.
+
+## 종료
+
+**반드시 이 순서**로 끄는 게 안전하다.
+
+```sh
+# 1. 시스템 프록시 OFF (인터넷 복구)
+sudo networksetup -setwebproxystate "Ethernet" off
+sudo networksetup -setsecurewebproxystate "Ethernet" off
+
+# 2. 컨테이너 종료
+docker compose down
+```
+
+순서가 중요한 이유: 시스템 프록시가 켜진 채로 컨테이너만 먼저 내리면
+8080 으로 보내는 트래픽을 받는 사람이 없어서 모든 인터넷이 막힌다.
 
 ## 사용 흐름
 
-1. `./run.sh` 로 mitmdump 기동
-2. 시스템 프록시가 켜진 상태에서 브라우저로 대상 사이트 탐색
-   (메인 → 기사 → 카테고리 등 필요한 페이지를 직접 클릭)
-3. mitmdump 화면(또는 `log.log`)에서 `[MISS]` `[SAVE]` 로그 확인
-4. 같은 URL 을 다시 호출하면 `[HIT]` 로그가 뜨고 네트워크에 안 나감
-5. 개발 중엔 같은 사이트의 같은 URL 을 무한히 반복 호출해도 OK
+1. 위 사전 준비 + 기동 완료
+2. 브라우저로 `config.yaml` 의 `allow_hosts` 에 등록된 사이트들을 평소처럼 탐색
+3. 로그에서 `[MISS]` → `[SAVE]` 확인
+4. 같은 URL 다시 방문하면 `[HIT]`
+5. 개발 중엔 같은 URL 을 무한히 반복 호출해도 캐시에서 응답
 
-## 종료 후 원복
+## 캐시 대상 사이트 추가/제거
 
-작업이 끝나면 시스템 프록시를 반드시 꺼야 일반 인터넷이 복구된다:
+`config.yaml` 의 `allow_hosts:` 리스트 수정 후 컨테이너 재시작:
 
 ```sh
-sudo networksetup -setwebproxystate "Ethernet" off
-sudo networksetup -setsecurewebproxystate "Ethernet" off
+docker compose restart mitmproxy
 ```
 
 ## 검증 (오프라인 재생)
 
 캐시가 진짜로 동작하는지 확실히 확인하는 방법:
 
-1. 한번 온라인으로 대상 페이지를 브라우저로 방문해 캐시를 채운다
-2. **Wi-Fi/이더넷을 끈다**
-3. 브라우저에서 같은 페이지를 강력 새로고침 (Cmd+Shift+R)
-4. 페이지가 그대로 뜨고, `log.log` 에 `[MISS]` 없이 `[HIT]` 만 찍히면 성공
+1. 온라인으로 한 번 사이트 방문해서 캐시를 채운다
+2. Wi-Fi/이더넷을 끈다
+3. 브라우저에서 같은 페이지 강력 새로고침 (Cmd+Shift+R)
+4. 페이지가 그대로 뜨고 로그가 모두 `[HIT]` 이면 성공
 
-## 알려진 한계
+## 트러블슈팅
 
-- **304 Not Modified**: 서버가 304 + 빈 본문을 돌려주면 캐시에 본문이
-  없어서 오프라인 재생 시 이미지가 깨질 수 있다. 브라우저 캐시가 채워준
-  덕분에 화면엔 보이지만, 캐시 비우면 깨진다. 해결 필요 시 addon 에서
-  요청의 `If-Modified-Since` / `If-None-Match` 헤더를 제거하면 된다.
-- **Timestamp 쿼리스트링**: `?t=1775724192679` 같이 매번 변하는 쿼리는
-  매번 새 캐시 키로 잡혀서 항상 MISS. 필요 시 addon 의 캐시 키 함수에서
-  특정 파라미터를 무시하도록 수정.
-- **Cert pinning 앱**: `--ignore-hosts` 에 추가하지 않은 cert pinning
-  앱들은 handshake 실패 로그를 남기지만 동작엔 영향 없다.
+### 인터넷이 안 된다
+시스템 프록시가 켜져 있는데 mitmproxy 컨테이너가 죽었거나 안 떠있다.
+- `docker compose ps` 로 컨테이너 살아있는지 확인
+- 정 안 되면 시스템 프록시 OFF
+
+### 페이지가 인증서 경고로 안 열린다
+mitmproxy CA 신뢰 등록이 안 됐다. 사전 준비 1단계 다시 수행.
+
+### 오프라인에서 캐시 HIT 인데도 페이지가 안 뜬다
+mitmproxy 가 응답 전에 업스트림 서버 연결을 시도하다 실패하고 있다.
+`config.yaml` 에 `connection_strategy: lazy` 가 있는지 확인.
+
+### `docker compose logs` 가 비어있다
+TTY 부족. `docker-compose.yml` 에 `tty: true` 가 있는지 확인.
+
+### 컨테이너 안에서 "killed by block_global" 로그
+도커 NAT 를 통해 들어오는 호스트 트래픽을 mitmproxy 가 외부 접근으로
+간주해 차단하고 있다. `config.yaml` 에 `block_global: false` 가 있는지 확인.
+
+### 등록 안 한 사이트의 트래픽까지 캐시된다
+`config.yaml` 의 `allow_hosts` 가 설정 안 됐거나 mitmproxy 가 옵션을
+못 읽고 있다. `--conf /work/config.yaml` 이 docker-compose.yml 의
+`command` 에 들어있는지 확인.

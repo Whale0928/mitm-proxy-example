@@ -1,0 +1,55 @@
+# mitmproxy 옵션 파일.
+#
+# mitmdump --conf config.yaml 로 로드된다.
+# command-line 의 --set / --ignore-hosts / --allow-hosts 등을 모두 여기에
+# yaml 형태로 모아둘 수 있어 관리가 편하다.
+
+# ─────────────────────────────────────────────────────────────
+# 캐시 대상 사이트 (whitelist)
+# ─────────────────────────────────────────────────────────────
+# 이 정규식들 중 하나에 매칭되는 호스트만 mitmproxy 가 가로챈다.
+# 나머지 트래픽 (Discord, iCloud, OS 백그라운드 등) 은 그대로 흘려보낸다.
+#
+# 각 패턴은 (^|\.)example\.com$ 형태로 작성해 apex 도메인과
+# 모든 서브도메인 (www, m, news, finance 등) 을 함께 매칭시킨다.
+allow_hosts:
+  # 영문 IT/AI 매체
+  - (^|\.)engadget\.com$
+  - (^|\.)gizmodo\.com$
+  - (^|\.)marktechpost\.com$
+  - (^|\.)mit\.edu$                          # news.mit.edu
+  - (^|\.)theverge\.com$
+  - (^|\.)tomshardware\.com$
+  - (^|\.)wccftech\.com$
+  - (^|\.)yahoo\.com$                        # finance.yahoo.com
+  - (^|\.)businessinsider\.com$
+  - (^|\.)aibusiness\.com$
+  - (^|\.)artificialintelligence-news\.com$
+  - (^|\.)aitimes\.com$
+  - (^|\.)cnbc\.com$
+  - (^|\.)techcrunch\.com$
+  - (^|\.)trendforce\.com$
+  - (^|\.)venturebeat\.com$
+
+  # 한글 IT/AI 매체
+  - (^|\.)itworld\.co\.kr$
+  - (^|\.)aitimes\.kr$
+
+# ─────────────────────────────────────────────────────────────
+# 캐시 동작 관련 옵션
+# ─────────────────────────────────────────────────────────────
+
+# 업스트림 사전 연결 차단. 캐시 HIT 시 네트워크에 안 나가게 하고,
+# 오프라인 재생을 가능하게 한다.
+connection_strategy: lazy
+
+# 컨테이너 NAT 를 통해 들어오는 호스트 트래픽을 mitmproxy 가
+# "외부 악용 시도"로 차단하지 않도록 푼다.
+block_global: false
+
+# mitmproxy 자체 로그 레벨. info 면 connect/disconnect 가 화면을 도배하므로
+# warn 으로 올려서 우리 addon 의 [HIT]/[MISS]/[SAVE] 만 깔끔히 보이게 한다.
+termlog_verbosity: warn
+
+# 요청별 한 줄 flow 요약 출력 비활성화 (0 = 출력 안 함).
+flow_detail: 0

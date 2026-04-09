@@ -20,28 +20,19 @@ services:
       # 캐시 디렉토리 (영속). 컨테이너 안에서 ./cache 가 곧 호스트의 ./cache 가 된다.
       - ./cache:/work/cache
 
-      # CA 디렉토리. 컨테이너 안의 mitmproxy 가 이 디렉토리에서 인증서를 읽는다.
-      # ca/ 를 깃 저장소에 커밋해두면 어디서 띄워도 같은 CA 를 재사용할 수 있다.
+      # CA 디렉토리. mitmproxy 의 confdir (~/.mitmproxy) 자리.
+      # 컨테이너 안의 mitmproxy 가 이 디렉토리에서 인증서를 읽는다.
       - ./ca:/home/mitmproxy/.mitmproxy
+
+      # mitmproxy 옵션 파일. confdir 안의 config.yaml 은 mitmdump 가 시작 시
+      # 자동으로 로드한다. 별도 --conf 옵션이 필요하지 않다.
+      - ./config.yaml:/home/mitmproxy/.mitmproxy/config.yaml:ro
 
     working_dir: /work
 
-    # run.sh 의 옵션과 동일.
-    # YAML 안에서 정규식의 $ 는 $$ 로 이스케이프해야 compose 가 변수로 해석하지 않는다.
+    # 옵션은 전부 config.yaml 에서 자동 로드된다.
+    # 여기서는 addon 로드만 명시한다.
     command:
       - mitmdump
       - -s
       - cache_addon.py
-      - --set
-      - connection_strategy=lazy
-      - --set
-      # 컨테이너 안의 mitmproxy 입장에선 호스트에서 들어오는 curl/브라우저 트래픽이
-      # 도커 NAT 를 거쳐 비로컬 IP 로 보인다. 기본값 block_global=true 면 이걸
-      # "외부에서 프록시를 악용하는 시도"로 간주해 죽여버리므로 false 로 풀어준다.
-      - block_global=false
-      - --set
-      - termlog_verbosity=warn
-      - --set
-      - flow_detail=0
-      - --ignore-hosts
-      - (^|\.)(anthropic\.com|icloud\.com|apple\.com|discord\.com|github\.com|googleapis\.com|gvt1\.com|gvt2\.com)$$
