@@ -21,10 +21,31 @@
 # - `^(.+\.)?`   : www, m, news, finance 등 모든 서브도메인 허용 (없어도 OK)
 # - `example\.com` : 실제 도메인 (점 이스케이프 필요)
 # - `:\d+$`      : 모든 포트 (80/443 등) 허용
-# TODO: allow_hosts 동작 방식 재검토 후 다시 추가 예정.
-# (regular proxy 모드에서 allow_hosts 가 매칭 안 되는 호스트를
-#  터널링하는지 차단하는지 실제 동작을 먼저 확인해야 함)
-# allow_hosts: []
+#
+# allow_hosts 에 걸린 호스트만 mitmproxy 가 TLS 를 가로채 addon 으로 넘긴다.
+# 나머지(네이버/카카오/은행앱/OS 백그라운드 등)는 CONNECT 단계에서 암호화된
+# 터널을 그대로 통과시키므로 가짜 인증서를 내밀지 않는다 → cert pinning 깨짐
+# 없음.
+# (addon 의 target-sites.txt 화이트리스트는 그대로 유지해 이중 안전장치로 둔다)
+allow_hosts:
+  - ^(.+\.)?engadget\.com:\d+$
+  - ^(.+\.)?gizmodo\.com:\d+$
+  - ^(.+\.)?marktechpost\.com:\d+$
+  - ^(.+\.)?mit\.edu:\d+$
+  - ^(.+\.)?theverge\.com:\d+$
+  - ^(.+\.)?tomshardware\.com:\d+$
+  - ^(.+\.)?wccftech\.com:\d+$
+  - ^(.+\.)?yahoo\.com:\d+$
+  - ^(.+\.)?businessinsider\.com:\d+$
+  - ^(.+\.)?aibusiness\.com:\d+$
+  - ^(.+\.)?artificialintelligence-news\.com:\d+$
+  - ^(.+\.)?aitimes\.com:\d+$
+  - ^(.+\.)?cnbc\.com:\d+$
+  - ^(.+\.)?techcrunch\.com:\d+$
+  - ^(.+\.)?trendforce\.com:\d+$
+  - ^(.+\.)?venturebeat\.com:\d+$
+  - ^(.+\.)?itworld\.co\.kr:\d+$
+  - ^(.+\.)?aitimes\.kr:\d+$
 
 # ─────────────────────────────────────────────────────────────
 # 캐시 동작 관련 옵션

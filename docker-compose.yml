@@ -9,6 +9,15 @@ services:
     # 이게 없으면 컨테이너는 정상 실행되지만 docker logs 가 텅 빈다.
     tty: true
 
+    environment:
+      # 동작 모드:
+      #   allow (허용, 기본) — 캐시 미스 시 실서버 접근 후 응답을 캐시에 저장
+      #   block (차단)       — 캐시 미스 시 504 반환, 실서버 접근 안 함
+      # 사용 예:
+      #   docker compose down && docker compose up -d                         # ALLOW(허용)
+      #   docker compose down && MITM_CACHE_MODE=block docker compose up -d   # BLOCK(차단)
+      - MITM_CACHE_MODE=${MITM_CACHE_MODE:-allow}
+
     ports:
       # 호스트의 8080 -> 컨테이너 8080. 시스템 프록시를 127.0.0.1:8080 으로 잡으면 된다.
       - "8080:8080"
@@ -16,6 +25,10 @@ services:
     volumes:
       # addon 스크립트 (읽기 전용)
       - ./cache_addon.py:/work/cache_addon.py:ro
+
+      # 캐시 대상 사이트 목록 (읽기 전용). addon 이 시작 시 파싱해서
+      # 화이트리스트로 사용한다.
+      - ./target-sites.txt:/work/target-sites.txt:ro
 
       # 캐시 디렉토리 (영속). 컨테이너 안에서 ./cache 가 곧 호스트의 ./cache 가 된다.
       - ./cache:/work/cache

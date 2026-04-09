@@ -18,9 +18,36 @@ mitmproxy 캐시 addon 예제
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from mitmproxy import http
+
+
+# ─────────────────────────────────────────────────────────────
+# Step -1. 동작 모드 (ALLOW / BLOCK)
+# ─────────────────────────────────────────────────────────────
+# 환경변수 MITM_CACHE_MODE 로 동작 모드를 선택한다. 기본값은 "allow".
+#
+# - ALLOW(허용) — 기본값
+#     캐시 미스 시 실서버로 통과시키고 응답을 캐시에 저장한다.
+#     타겟 사이트를 돌아다니면서 캐시를 채우는 수집 단계에서 사용.
+#
+# - BLOCK(차단)
+#     캐시 미스 시 504 응답으로 즉시 차단. 실서버에 한 바이트도 안 보낸다.
+#     크롤러 반복 실행·오프라인 디버깅 단계에서 사용. 이미 수집해둔 캐시로만
+#     응답하고, 예상 못 한 URL 접근으로 실사이트가 차단될 위험을 원천 봉쇄.
+#
+# 토글 방법:
+#   docker compose down && docker compose up -d                                 # ALLOW(허용) - 기본
+#   docker compose down && MITM_CACHE_MODE=block docker compose up -d           # BLOCK(차단)
+_MODE_RAW = os.environ.get("MITM_CACHE_MODE", "allow").strip().lower()
+if _MODE_RAW not in ("allow", "block"):
+    print(f"[WARN] invalid MITM_CACHE_MODE={_MODE_RAW!r}, falling back to 'allow'")
+    _MODE_RAW = "allow"
+MODE = _MODE_RAW
+BLOCK_MODE = (MODE == "block")
+_MODE_LABEL = {"allow": "ALLOW(허용)", "block": "BLOCK(차단)"}[MODE]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -33,25 +60,46 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 0-1. 캐시/가로채기 제외 호스트
+# Step 0-1. 캐시 대상 호스트 화이트리스트
 # ─────────────────────────────────────────────────────────────
-# 여기에 들어간 호스트는 캐시에 저장하지도 않고, 캐시에서 응답하지도 않는다.
-# (Claude Code 같은 자체 도구의 트래픽이 캐시에 들어가는 것을 막기 위함)
+# target-sites.txt 에서 캐시 대상 호스트 목록을 읽어온다.
+# 파일 형식: "이름 | URL | 호스트(eTLD+1)"  (# 으로 시작하는 줄은 주석)
+# 세 번째 컬럼(호스트)만 추출해 suffix 매칭에 쓴다.
 #
-# 주의: addon 단의 차단은 "캐시 동작만" 막는 것이고, mitmproxy 자체의 TLS
-# 가로채기는 여전히 일어난다. TLS 가로채기까지 완전히 우회하려면 mitmdump
-# 실행 시 다음 옵션을 함께 줘야 한다:
-#
-#     mitmdump -s cache_addon.py --ignore-hosts '(^|\.)anthropic\.com$'
-#
-EXCLUDED_HOST_SUFFIXES = (
-    "anthropic.com",
-)
+# 화이트리스트에 없는 호스트는 캐시에 저장되지도, 캐시에서 응답되지도 않고
+# 그대로 실서버로 통과한다 ([SKIP] 로그만 찍힘). mitmproxy 자체의 TLS
+# 가로채기는 여전히 일어나므로, cert pinning 을 하는 앱이 있다면 별도로
+# config.yaml 의 ignore_hosts 에 추가해야 한다.
+TARGET_SITES_FILE = Path(__file__).parent / "target-sites.txt"
 
 
-def _is_excluded(request: http.Request) -> bool:
+def _load_allowed_suffixes(path: Path) -> tuple[str, ...]:
+    if not path.exists():
+        print(f"[WARN] target-sites.txt not found at {path}; allowing nothing")
+        return ()
+    suffixes: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 3:
+            continue
+        host = parts[2]
+        if host and host not in suffixes:
+            suffixes.append(host)
+    return tuple(suffixes)
+
+
+ALLOWED_HOST_SUFFIXES = _load_allowed_suffixes(TARGET_SITES_FILE)
+print(f"[INIT] mode={_MODE_LABEL}")
+print(f"[INIT] allowed host suffixes ({len(ALLOWED_HOST_SUFFIXES)}): "
+      f"{', '.join(ALLOWED_HOST_SUFFIXES) or '(none)'}")
+
+
+def _is_allowed(request: http.Request) -> bool:
     host = request.pretty_host or ""
-    return any(host == s or host.endswith("." + s) for s in EXCLUDED_HOST_SUFFIXES)
+    return any(host == s or host.endswith("." + s) for s in ALLOWED_HOST_SUFFIXES)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -73,15 +121,29 @@ def _cache_path(request: http.Request) -> Path:
 # 이 함수를 호출한다. 여기서 flow.response 를 채워주면
 # mitmproxy는 "아, 이미 응답이 있구나" 하고 외부로 나가지 않는다.
 def request(flow: http.HTTPFlow) -> None:
-    if _is_excluded(flow.request):
-        # 제외 호스트: 캐시 로직을 전혀 적용하지 않고 그대로 통과시킨다.
+    if not _is_allowed(flow.request):
+        # 화이트리스트에 없는 호스트: 캐시 로직을 전혀 적용하지 않고
+        # 그대로 실서버로 통과시킨다.
         print(f"[SKIP] {flow.request.method} {flow.request.url}")
         return
 
     path = _cache_path(flow.request)
 
     if not path.exists():
-        # 캐시 미스: 일단 통과시키면 mitmproxy가 실제 서버로 보낸다.
+        if BLOCK_MODE:
+            # BLOCK(차단) 모드: 실서버로 내보내지 않고 504 로 즉시 차단한다.
+            # flow.response 를 채우면 mitmproxy 는 업스트림에 연결조차 안 함.
+            print(f"[BLOCK] {flow.request.method} {flow.request.url}")
+            flow.response = http.Response.make(
+                504,
+                b"mitm-cache: BLOCK mode - URL not in cache, upstream blocked\n",
+                {
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "X-Cache": "BLOCK",
+                },
+            )
+            return
+        # ALLOW(허용) 모드: 캐시 미스면 mitmproxy 가 실제 서버로 보낸다.
         # 실제 응답은 아래 response() 훅에서 저장한다.
         print(f"[MISS] {flow.request.method} {flow.request.url}")
         return
@@ -107,8 +169,13 @@ def request(flow: http.HTTPFlow) -> None:
 # 실제 서버에서 응답이 돌아온 직후 호출되는 훅.
 # 캐시 미스였던 요청만 여기서 저장하면 된다.
 def response(flow: http.HTTPFlow) -> None:
-    if _is_excluded(flow.request):
-        # 제외 호스트는 저장도 하지 않는다.
+    if not _is_allowed(flow.request):
+        # 화이트리스트 밖 호스트는 저장도 하지 않는다.
+        return
+
+    if flow.response and flow.response.headers.get("X-Cache") == "BLOCK":
+        # BLOCK 모드에서 request() 훅이 합성한 504 차단 응답.
+        # 이걸 저장하면 다음 요청부터 차단 응답이 영구 히트되어버린다.
         return
 
     path = _cache_path(flow.request)
