@@ -3,7 +3,7 @@
 mitmproxy 기반 **크롤러용 HTTP(S) 스냅샷 캐시 프록시**.
 
 > mitmproxy 개념/동작 원리는 → [what-is-mitm-proxy.md](./what-is-mitm-proxy.md)
-> 프로젝트 작업 이력은 → [실록.md](history.md) (append-only 사료)
+> 설계 결정은 [ADR](adr/0001%20스냅샷%20캐시와%20로컬%20실행.md), 과거 작업 기록은 [history.md](history.md)를 참고한다.
 
 ---
 
@@ -21,7 +21,7 @@ mitmproxy 기반 **크롤러용 HTTP(S) 스냅샷 캐시 프록시**.
 
 ## 동작 모드 — ALLOW(허용) / BLOCK(차단)
 
-환경변수 `MITM_CACHE_MODE` 로 두 가지 모드를 전환한다.
+환경변수 `MITM_CACHE_MODE` 로 두 가지 모드를 전환한다. 아래 캐시 동작은 `target-sites.txt`의 대상 호스트에 적용한다. 목록 밖 호스트는 통과한다.
 
 | 모드 | 값 | 용도 | 캐시 미스 시 |
 |---|---|---|---|
@@ -67,6 +67,14 @@ docker compose logs -f mitmproxy   # 다른 터미널에서 로그 모니터링
 ```
 
 기동 로그에 `[INIT] mode=ALLOW(허용)` + `allowed host suffixes (18)` 이 뜨면 정상.
+
+### 로컬 CA와 접근 범위
+
+처음 실행하면 mitmproxy가 `ca/`에 설치별 CA를 생성한다. 인증서와 개인키는 저장소에 포함하지 않는다.
+클라이언트에 등록할 파일은 공개 인증서인 `ca/mitmproxy-ca-cert.pem`이다. `mitmproxy-ca.pem`과 `.p12` 개인키 파일을 공유하지 않는다.
+이전 저장소의 CA를 등록한 환경에서는 기존 CA의 신뢰를 해제하고 새로 생성한 CA를 등록해야 한다.
+
+Compose는 프록시 포트를 `127.0.0.1:8080`에만 노출한다. 시스템 프록시나 OS 인증서 저장소를 자동으로 변경하지 않는다.
 
 ### 2. 프록시 경유 테스트 (curl)
 
@@ -276,7 +284,7 @@ mitmproxy 가 TLS 가로채기를 할 호스트를 `host:port` 정규식으로 �
 | `config.yaml` | mitmproxy 옵션 (`allow_hosts`, `connection_strategy` 등) |
 | `docker-compose.yml` | 공식 mitmproxy 이미지로 컨테이너 기동, 환경변수 주입 |
 | `target-sites.txt` | 캐시 대상 사이트 목록 (addon 화이트리스트 소스) |
-| `ca/` | mitmproxy CA 인증서 (개인키 포함, **프라이빗 저장소 전제**) |
+| `ca/` | 첫 실행 시 생성하는 로컬 CA. 개인키를 포함하므로 Git에서 제외 |
 | `cache/` | 캐시된 응답 (한 요청 = 한 JSON 파일, 파일명 = sha256(method+URL)) |
 | `README.md` | 본 문서 |
 | `what-is-mitm-proxy.md` | mitmproxy 개념 해설 |
@@ -285,6 +293,10 @@ mitmproxy 가 TLS 가로채기를 할 호스트를 `host:port` 정규식으로 �
 ---
 
 ## 알려진 제약
+
+- BLOCK 모드는 허용 목록에 포함된 요청의 캐시 미스만 차단한다. 허용 목록 밖 호스트는 통과하므로 전체 네트워크를 차단하는 모드가 아니다.
+- 캐시 키는 HTTP 메서드와 전체 URL만 사용한다. POST 본문, Cookie, Authorization, `Vary` 차이는 구분하지 않으므로 로그인 세션이나 여러 사용자가 공유하는 캐시로 사용하지 않는다.
+- 응답 헤더와 본문을 그대로 저장한다. 캐시와 로그에는 쿠키, URL 파라미터, 개인정보가 포함될 수 있으므로 공개하거나 커밋하지 않는다.
 
 - **경로 단위 필터링 불가.** `allow_hosts`/`ignore_hosts` 는 CONNECT 단계에서 동작
   하므로 `host:port` 매칭만 된다. addon 레벨에서 `flow.request.path` 필터링은
@@ -378,3 +390,7 @@ print(f'삭제: {n}')
 - [mitmproxy 공식 문서](https://docs.mitmproxy.org/)
 - [what-is-mitm-proxy.md](./what-is-mitm-proxy.md) — mitmproxy 개념 해설
 - [실록.md](history.md) — 프로젝트 작업 이력 및 의사결정 기록
+
+## 라이선스
+
+프로젝트 코드는 [MIT License](LICENSE)를 따른다. mitmproxy에는 원본 프로젝트의 라이선스가 적용된다.

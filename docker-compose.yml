@@ -19,8 +19,8 @@ services:
       - MITM_CACHE_MODE=${MITM_CACHE_MODE:-allow}
 
     ports:
-      # 호스트의 8080 -> 컨테이너 8080. 시스템 프록시를 127.0.0.1:8080 으로 잡으면 된다.
-      - "8080:8080"
+      # 로컬 클라이언트만 접속하도록 loopback에 바인딩한다.
+      - "127.0.0.1:8080:8080"
 
     volumes:
       # addon 스크립트 (읽기 전용)
@@ -34,7 +34,7 @@ services:
       - ./cache:/work/cache
 
       # CA 디렉토리. mitmproxy 의 confdir (~/.mitmproxy) 자리.
-      # 컨테이너 안의 mitmproxy 가 이 디렉토리에서 인증서를 읽는다.
+      # 첫 실행 시 설치별 CA를 생성하고 이후 실행에서 재사용한다.
       - ./ca:/home/mitmproxy/.mitmproxy
 
       # mitmproxy 옵션 파일. confdir 안의 config.yaml 은 mitmdump 가 시작 시

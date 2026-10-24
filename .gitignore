@@ -40,5 +40,17 @@ data/
 cache/
 log.log
 
-# Generated certificates remain local.
+# Local CA material and captured traffic must remain private.
 /ca/
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.mitm
+*.flows
+*.har
+*.log
+__pycache__/
+*.py[cod]
+.venv/

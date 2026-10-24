@@ -1,6 +1,6 @@
 # mitmproxy 옵션 파일.
 #
-# mitmdump --conf config.yaml 로 로드된다.
+# Compose가 ~/.mitmproxy/config.yaml에 마운트하면 자동으로 로드된다.
 # command-line 의 --set / --ignore-hosts / --allow-hosts 등을 모두 여기에
 # yaml 형태로 모아둘 수 있어 관리가 편하다.
 
